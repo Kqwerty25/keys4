@@ -1,0 +1,254 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <title>Книжный магазин</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px
+        }
+
+        .hidden {
+            display: none
+        }
+
+        .book {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0
+        }
+
+        .admin-controls {
+            background: #f0f0f0;
+            padding: 10px;
+            margin-top: 10px
+        }
+
+        .book-status {
+            color: green;
+            font-weight: bold
+        }
+
+        .rented {
+            color: red
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Книжный магазин</h1>
+
+    <div id="auth">
+        <label>Имя пользователя: <input id="username" /></label>
+        <select id="role">
+            <option value="user">Пользователь</option>
+            <option value="admin">Администратор</option>
+        </select>
+        <button onclick="login()">Войти</button>
+    </div>
+
+    <div id="userPanel" class="hidden">
+        <h2>Добро пожаловать, <span id="userNameDisplay"></span>!</h2>
+
+        <div>
+            <label>
+                Категория:
+                <input id="filterCategory" oninput="renderBooks()" placeholder="Жанр / Тема" />
+            </label>
+            <label>
+                Автор:
+                <input id="filterAuthor" oninput="renderBooks()" placeholder="ФИО автора" />
+            </label>
+            <label>
+                Год:
+                <input id="filterYear" oninput="renderBooks()" type="number" />
+            </label>
+        </div>
+
+        <h3>Каталог книг</h3>
+        <div id="bookList"></div>
+    </div>
+
+    <div id="adminPanel" class="hidden">
+        <h2>Панель администратора</h2>
+        <h3>Добавить книгу</h3>
+        <input id="bookTitle" placeholder="Название" />
+        <input id="bookAuthor" placeholder="Автор" />
+        <input id="bookCategory" placeholder="Категория" />
+        <input id="bookYear" type="number" placeholder="Год" />
+        <input id="bookPrice" type="number" placeholder="Цена" />
+        <select id="bookAvailability">
+            <option value="available">Доступна</option>
+            <option value="unavailable">Недоступна</option>
+        </select>
+        <button onclick="addBook()">Добавить</button>
+
+        <h3>Список книг</h3>
+        <div id="adminBookList"></div>
+    </div>
+
+    <script>
+// 📚 Данные
+let books = JSON.parse(localStorage.getItem('books')) || [
+  { id: 1, title: 'Война и мир', author: 'Л. Н. Толстой', category: 'Роман', year: 1869, price: 500, availability: 'available', status: null },
+  { id: 2, title: 'Мастер и Маргарита', author: 'М. А. Булгаков', category: 'Фантастика', year: 1940, price: 400, availability: 'available', status: null },
+  { id: 3, title: 'Человек в поисках смысла', author: 'Виктор Франкл', category: 'Психология', year: 1946, price: 300, availability: 'available', status: null }
+];
+let currentUser = null;
+
+// 🔐 Вход
+function login() {
+  const name = document.getElementById('username').value.trim();
+  const role = document.getElementById('role').value;
+  if (!name) return alert("Введите имя");
+  currentUser = { name, role };
+  document.getElementById('auth').classList.add('hidden');
+  document.getElementById('userNameDisplay').textContent = name;
+
+  if (role === 'user') {
+    document.getElementById('userPanel').classList.remove('hidden');
+    renderBooks();
+  } else {
+    document.getElementById('adminPanel').classList.remove('hidden');
+    renderAdminPanel();
+  }
+}
+
+// 🔄 Сохранение
+function saveBooks() {
+  localStorage.setItem('books', JSON.stringify(books));
+}
+
+// 👁️ Отображение книг для пользователя
+function renderBooks() {
+  const list = document.getElementById('bookList');
+  list.innerHTML = '';
+  const cat = document.getElementById('filterCategory').value.toLowerCase();
+  const auth = document.getElementById('filterAuthor').value.toLowerCase();
+  const year = document.getElementById('filterYear').value;
+
+  books.forEach(book => {
+    if (cat && !book.category.toLowerCase().includes(cat)) return;
+    if (auth && !book.author.toLowerCase().includes(auth)) return;
+    if (year && parseInt(book.year) != parseInt(year)) return;
+
+    const div = document.createElement('div');
+    div.className = 'book';
+    div.innerHTML = `
+      <b>${book.title}</b> (${book.year})<br/>
+      Автор: ${book.author}<br/>
+      Категория: ${book.category}<br/>
+      Цена: ${book.price} руб<br/>
+      Статус: ${book.availability === 'available' ? 'Доступна' : 'Недоступна'}
+    `;
+
+    if (book.availability === 'available') {
+      const select = document.createElement('select');
+      select.innerHTML = `
+        <option value="purchase">Купить</option>
+        <option value="2w">Аренда: 2 недели</option>
+        <option value="1m">Аренда: 1 месяц</option>
+        <option value="3m">Аренда: 3 месяца</option>
+      `;
+      const btn = document.createElement('button');
+      btn.textContent = 'Выбрать';
+      btn.onclick = () => rentBook(book.id, select.value);
+      div.appendChild(select);
+      div.appendChild(btn);
+    }
+
+    list.appendChild(div);
+  });
+}
+
+// 🛒 Аренда/покупка книги
+function rentBook(id, type) {
+  const book = books.find(b => b.id === id);
+  const today = new Date();
+  let due = null;
+  if (type === 'purchase') {
+    book.status = { type: 'покупка', by: currentUser.name, date: today.toISOString() };
+    book.availability = 'unavailable';
+  } else {
+    let days = type === '2w' ? 14 : (type === '1m' ? 30 : 90);
+    due = new Date(today.getTime() + days * 24 * 60 * 60 * 1000);
+    book.status = { type: 'аренда', by: currentUser.name, date: today.toISOString(), due: due.toISOString() };
+    book.availability = 'unavailable';
+  }
+  alert("Операция выполнена");
+  saveBooks();
+  renderBooks();
+}
+
+// 🔧 Панель администратора
+function renderAdminPanel() {
+  const list = document.getElementById('adminBookList');
+  list.innerHTML = '';
+  books.forEach(book => {
+    const div = document.createElement('div');
+    div.className = 'book';
+    const rented = book.status?.type === 'аренда';
+    let reminder = '';
+    if (rented) {
+      const dueDate = new Date(book.status.due);
+      const now = new Date();
+      if (now > dueDate) reminder = `<span class="rented">❗ Просрочка аренды (${book.status.by})</span>`;
+    }
+    div.innerHTML = `
+      <b>${book.title}</b> (${book.year})<br/>
+      Автор: ${book.author}, Категория: ${book.category}<br/>
+      Цена: <input type="number" value="${book.price}" onchange="updatePrice(${book.id}, this.value)" /> руб<br/>
+      Статус:
+      <select onchange="updateAvailability(${book.id}, this.value)">
+        <option value="available" ${book.availability === 'available' ? 'selected' : ''}>Доступна</option>
+        <option value="unavailable" ${book.availability === 'unavailable' ? 'selected' : ''}>Недоступна</option>
+      </select>
+      ${reminder}
+    `;
+    list.appendChild(div);
+  });
+}
+
+function addBook() {
+  const title = document.getElementById('bookTitle').value.trim();
+  const author = document.getElementById('bookAuthor').value.trim();
+  const category = document.getElementById('bookCategory').value.trim();
+  const year = parseInt(document.getElementById('bookYear').value);
+  const price = parseFloat(document.getElementById('bookPrice').value);
+  const availability = document.getElementById('bookAvailability').value;
+
+  if (!title || !author || !category || !year || isNaN(price)) {
+    return alert('Заполните все поля');
+  }
+
+  const newBook = {
+    id: Date.now(),
+    title,
+    author,
+    category,
+    year,
+    price,
+    availability,
+    status: null
+  };
+  books.push(newBook);
+  saveBooks();
+  renderAdminPanel();
+}
+
+function updatePrice(id, value) {
+  const book = books.find(b => b.id === id);
+  book.price = parseFloat(value);
+  saveBooks();
+}
+
+function updateAvailability(id, val) {
+  const book = books.find(b => b.id === id);
+  book.availability = val;
+  saveBooks();
+}
+
+    </script>
+</body>
+</html>
